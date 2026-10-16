@@ -1,0 +1,77 @@
+name: horario
+x-api: &api
+  build: ./backend
+  image: horario-backend
+  restart: unless-stopped
+  environment: &environment
+    DATABASE_URL: postgresql://${POSTGRES_USER:-horario}:${POSTGRES_PASSWORD:-horario_desarrollo_2026}@horariobd:5432/${POSTGRES_DB:-horario}
+  depends_on:
+    horariobd:
+      condition: service_healthy
+  networks: [horario-interna]
+  healthcheck:
+    test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+services:
+  horariobd:
+    image: postgres:16-alpine
+    container_name: horariobd
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-horario}
+      POSTGRES_USER: ${POSTGRES_USER:-horario}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-horario_desarrollo_2026}
+    volumes:
+      - horario-datos:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks: [horario-interna]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  horarioservicio1:
+    <<: *api
+    container_name: horarioservicio1
+    environment:
+      <<: *environment
+      RESOURCE: materias
+  horarioservicio2:
+    <<: *api
+    container_name: horarioservicio2
+    environment:
+      <<: *environment
+      RESOURCE: tareas
+  horarioservicio3:
+    <<: *api
+    container_name: horarioservicio3
+    environment:
+      <<: *environment
+      RESOURCE: horario
+  horariogateway:
+    image: horario-backend
+    build: ./backend
+    container_name: horariogateway
+    restart: unless-stopped
+    environment:
+      RESOURCE: gateway
+      NO_PROXY: horarioservicio1,horarioservicio2,horarioservicio3,localhost
+    ports: ['${PORT:-8080}:8000']
+    volumes: ['./web:/app/web:ro']
+    networks: [horario-interna]
+    depends_on:
+      horarioservicio1: {condition: service_healthy}
+      horarioservicio2: {condition: service_healthy}
+      horarioservicio3: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+networks:
+  horario-interna:
+    driver: bridge
+volumes:
+  horario-datos:
